@@ -23,7 +23,7 @@ def config_group():
 @click.option('--password', help='Password for authentication', hide_input=True)
 @click.option('--verify-ssl/--no-verify-ssl', default=True,
               help='Verify SSL certificates')
-@click.option('--save-password/--no-save-password', default=False,
+@click.option('--save-password/--no-save-password', default=True,
               help='Save password in config file (not recommended)')
 @pass_config
 def init_config(config: Config, server: str, token: Optional[str],
@@ -56,6 +56,10 @@ def init_config(config: Config, server: str, token: Optional[str],
                 username = click.prompt('Username')
                 password = click.prompt('Password', hide_input=True)
 
+        # TODO not sure what default behavior I want here
+        verify_ssl = click.prompt('Verify SSL certificates', type=bool, default=True)
+
+
         # Update config
         config.server = server
         config.token = token
@@ -67,6 +71,9 @@ def init_config(config: Config, server: str, token: Optional[str],
             warning("Saving password in config file is not recommended")
             if not click.confirm('Are you sure?'):
                 save_password = False
+
+            # Add this line
+        config.set_save_password(save_password)
 
         if save_password:
             config.password = password
