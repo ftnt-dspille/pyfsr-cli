@@ -1,5 +1,6 @@
 """Output formatting utilities for PyFSR CLI."""
 import json
+import warnings
 from typing import Any, List, Optional
 
 from rich.console import Console
@@ -7,6 +8,11 @@ from rich.table import Table
 
 console = Console()
 
+def custom_ssl_warning(*args: Any) -> None:
+    if "Unverified HTTPS request" in str(args[0]):
+        warning("Using unverified HTTPS connection - certificate validation disabled")
+
+warnings.showwarning = custom_ssl_warning
 
 def format_output(data: Any, format: str = 'json', table_columns: Optional[List[str]] = None) -> None:
     """Format and display output data.
