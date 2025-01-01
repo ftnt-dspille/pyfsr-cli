@@ -29,9 +29,36 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.10",
+    "click>=8.0.0", # Add core dependencies needed for testing
+    "pyfsr>=0.2.1",
+    "rich>=10.0.0",
+    "pyyaml>=6.0.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "integration: marks tests that require a real FortiSOAR instance",
+]
+addopts = "-ra -q"
+
+[tool.coverage.run]
+source = ["pyfsr_cli"]
+omit = [
+    "tests/*",
+    "**/__init__.py",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
 ]
 
 #docs = [
