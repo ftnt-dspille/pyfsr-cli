@@ -3,7 +3,6 @@ from unittest.mock import Mock
 
 import pytest
 from click.testing import CliRunner
-from pyfsr_cli.services.alerts import AlertService
 
 from pyfsr_cli.cli import cli, CLIState
 
@@ -16,11 +15,6 @@ def cli_state():
 @pytest.fixture
 def mock_client():
     return Mock()
-
-
-@pytest.fixture
-def mock_alert_service():
-    return Mock(spec=AlertService)
 
 
 def test_cli_init_with_token():

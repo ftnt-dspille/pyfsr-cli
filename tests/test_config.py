@@ -1,123 +1,106 @@
-"""Tests for configuration loading and management."""
+# tests/config/test_cli_config.py
+
+import os
+import tempfile
+from pathlib import Path
 
 import pytest
 import yaml
 
-from pyfsr_cli.config import ConfigLoader, CLIConfig
+from pyfsr_cli.config import CLIConfig, CLIState
 
 
 @pytest.fixture
-def config_file(tmp_path):
-    """Create a temporary config file."""
-    config_path = tmp_path / '.pyfsr.yaml'
-    config_data = {
-        'server': 'https://file.example.com',
-        'token': 'file-token',
-        'verify_ssl': True,
-        'output_format': 'json'
-    }
-    with open(config_path, 'w') as f:
-        yaml.dump(config_data, f)
-    return config_path
+def temp_config_file():
+    with tempfile.NamedTemporaryFile(suffix='.yaml', delete=False) as f:
+        yield Path(f.name)
+    os.unlink(f.name)
 
 
 @pytest.fixture
-def config_loader(config_file, monkeypatch):
-    """Create config loader with test config file."""
-    loader = ConfigLoader()
-    monkeypatch.setattr(loader, 'config_path', config_file)
-    return loader
+def cli_state(temp_config_file):
+    state = CLIState()
+    state.config_path = temp_config_file
+    return state
 
 
-def test_config_precedence(config_loader, monkeypatch):
-    """Test configuration loading precedence."""
-    # Set environment variables
-    monkeypatch.setenv('PYFSR_SERVER', 'https://env.example.com')
-    monkeypatch.setenv('PYFSR_TOKEN', 'env-token')
+def test_config_precedence(cli_state):
+    # File config
+    with open(cli_state.config_path, 'w') as f:
+        yaml.dump({'server': 'file-server'}, f)
 
-    # Set CLI parameters
-    cli_params = {
-        'server': 'https://cli.example.com',
-        'token': 'cli-token'
-    }
+    # Env var
+    os.environ['PYFSR_SERVER'] = 'env-server'
 
-    # Load config
-    config = config_loader.load(cli_params)
+    # CLI params
+    cli_params = {'server': 'cli-server'}
 
-    # CLI parameters should take precedence
-    assert config.server == 'https://cli.example.com'
-    assert config.token == 'cli-token'
-
-    # Load without CLI params to test env vars
-    config = config_loader.load()
-
-    # Environment variables should take precedence over file
-    assert config.server == 'https://env.example.com'
-    assert config.token == 'env-token'
+    cli_state.load_config(cli_params)
+    assert cli_state.config.server == 'cli-server'
 
 
-def test_auth_methods(config_loader):
-    """Test different authentication methods."""
-    # Test token auth
-    config = config_loader.load({'token': 'test-token'})
-    assert config.auth == 'test-token'
-
-    # Test username/password auth
-    config = config_loader.load({
-        'username': 'test-user',
-        'password': 'test-pass'
-    })
-    assert config.auth == ('test-user', 'test-pass')
-
-    # Test no auth
-    config = config_loader.load({})
-    assert config.auth is None
-
-
-def test_save_config(config_loader):
-    """Test saving configuration to file."""
+def test_auth_property():
     config = CLIConfig(
-        server='https://test.example.com',
         token='test-token',
-        verify_ssl=True
+        username='user',
+        password='pass'
     )
+    assert config.auth == 'test-token'  # Token takes precedence
 
-    # Save config
-    config_loader.save(config)
-
-    # Verify saved config
-    with open(config_loader.config_path) as f:
-        saved_config = yaml.safe_load(f)
-
-    assert saved_config['server'] == config.server
-    assert saved_config['token'] == config.token
-    assert saved_config['verify_ssl'] == config.verify_ssl
-    assert 'password' not in saved_config
+    config = CLIConfig(username='user', password='pass')
+    assert config.auth == ('user', 'pass')
 
 
-def test_password_saving(config_loader):
-    """Test password saving behavior."""
+def test_save_password():
     config = CLIConfig(
-        username='test-user',
-        password='test-pass',
-        save_password=True
+        username='user',
+        password='secret',
+        save_password=False
     )
+    config_dict = config.to_dict()
+    assert 'password' not in config_dict
 
-    # Save config
-    config_loader.save(config)
+    config.save_password = True
+    config_dict = config.to_dict()
+    assert config_dict['password'] == 'secret'
 
-    # Verify password was saved
-    with open(config_loader.config_path) as f:
-        saved_config = yaml.safe_load(f)
 
-    assert saved_config['password'] == config.password
+@pytest.mark.parametrize('input_config,expected_error', [
+    ({}, "Server must be provided"),
+    ({'server': 'test'}, "Either token or username/password must be provided"),
+])
+def test_client_initialization_validation(cli_state, input_config, expected_error):
+    cli_state.load_config(input_config)
+    with pytest.raises(Exception, match=expected_error):
+        cli_state.init_client()
 
-    # Test without save_password
-    config.save_password = False
-    config_loader.save(config)
 
-    # Verify password was not saved
-    with open(config_loader.config_path) as f:
-        saved_config = yaml.safe_load(f)
+def test_environment_loading(cli_state):
+    os.environ.update({
+        'PYFSR_SERVER': 'env-server',
+        'PYFSR_TOKEN': 'env-token',
+        'PYFSR_VERIFY_SSL': 'false'
+    })
+    cli_state.load_config()
+    assert cli_state.config.server == 'env-server'
+    assert cli_state.config.token == 'env-token'
+    assert cli_state.config.verify_ssl is False
 
-    assert 'password' not in saved_config
+
+def test_config_file_persistence(cli_state, monkeypatch):
+    # Clear any existing env vars
+    monkeypatch.delenv('PYFSR_SERVER', raising=False)
+    monkeypatch.delenv('PYFSR_TOKEN', raising=False)
+
+    config = {
+        'server': 'test-server',
+        'token': 'test-token'
+    }
+    cli_state.load_config(config)
+    cli_state.save_config()
+
+    new_state = CLIState()
+    new_state.config_path = cli_state.config_path
+    new_state.load_config()
+    assert new_state.config.server == 'test-server'
+    assert new_state.config.token == 'test-token'

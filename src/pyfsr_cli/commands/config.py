@@ -18,7 +18,7 @@ def config_group():
 @click.option('--username', help='Username for authentication')
 @click.option('--password', help='Password for authentication', hide_input=True)
 @click.option('--verify-ssl/--no-verify-ssl', help='Verify SSL certificates')
-@click.option('--save-password/--no-save-password', default=False,
+@click.option('--save-password/--no-save-password', default=True,
               help='Save password in config file (not recommended)')
 @click.option('--output', type=click.Choice(['json', 'table', 'yaml']), default='json',
               help='Output format')
@@ -34,10 +34,12 @@ def init_config(ctx, server: str, token: Optional[str],
                 "Cannot use both token and username/password authentication"
             )
 
-        if (username and not password) or (password and not username):
-            raise click.BadParameter(
-                "Both username and password must be provided for password authentication"
-            )
+        if username and not password:
+            password = click.prompt('Password', hide_input=True)
+            auth_method = 'userpass'
+
+        if password and not username:
+            raise click.BadParameter("Username must be provided with password")
 
         # If verify_ssl not specified, prompt for it
         if verify_ssl is None:
@@ -95,29 +97,43 @@ def init_config(ctx, server: str, token: Optional[str],
 def show_config(ctx):
     """Show current configuration."""
     try:
-        if not ctx.obj.config:
-            ctx.obj.load_config()
+        # Check if configuration is loaded
+        if not ctx.obj or not ctx.obj.config:
+            raise click.UsageError("Configuration is not loaded. Please initialize it using 'config init'.")
 
         config_data = {
             'server': ctx.obj.config.server,
             'verify_ssl': ctx.obj.config.verify_ssl,
             'output_format': ctx.obj.config.output_format,
-            'auth_method': 'token' if ctx.obj.config.token else 'userpass' if ctx.obj.config.username else None
+            'auth_method': (
+                'token' if ctx.obj.config.token else
+                'userpass' if ctx.obj.config.username else
+                'None'
+            )
         }
 
-        # Don't show sensitive values
+        # Mask sensitive values
         if ctx.obj.config.username:
             config_data['username'] = ctx.obj.config.username
             config_data['password'] = '********' if ctx.obj.config.password else None
         elif ctx.obj.config.token:
             config_data['token'] = '********'
 
+        # Display the configuration
+        click.echo("Current Configuration:")
         for key, value in config_data.items():
-            if value is not None:
-                click.echo(f"{key}: {value}")
+            click.echo(f"{key}: {value}" if value is not None else f"{key}: Not Set")
 
-    except Exception as e:
-        error(f"Failed to show configuration: {str(e)}")
+    except click.UsageError as usage_error:
+        error(f"Error: {str(usage_error)}")
+        ctx.exit(1)
+
+    except AttributeError as attr_error:
+        error(f"Configuration error: {str(attr_error)}. Ensure proper initialization.")
+        ctx.exit(1)
+
+    except Exception as general_error:
+        error(f"An unexpected error occurred: {str(general_error)}")
         ctx.exit(1)
 
 
@@ -127,7 +143,7 @@ def show_config(ctx):
 def clear_config(ctx):
     """Clear current configuration."""
     try:
-        ctx.obj.config_loader.config_path.unlink(missing_ok=True)
+        ctx.obj.config_path.unlink(missing_ok=True)
         success("Configuration cleared successfully")
     except Exception as e:
         error(f"Failed to clear configuration: {str(e)}")

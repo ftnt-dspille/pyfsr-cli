@@ -1,22 +1,23 @@
 """Alert management commands for PyFSR CLI."""
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import click
 
 from ..utils.output import format_output, error, success
-
-
-def get_picklist_value(ctx, value: Optional[str], picklist_name: str) -> Optional[str]:
-    """Convert picklist name to IRI value if needed."""
-    if not value:
-        return None
-    # TODO: Implement picklist lookup logic
-    return value
-
+from ..utils.custom_decorators import requires_client
 
 @click.group(name='alerts')
 def alerts_group():
-    """Manage FortiSOAR alerts."""
+    """
+    Manage FortiSOAR alerts.
+
+    This command group provides operations for working with alerts including:
+    \b- Listing alerts
+    \b- Getting alert details
+    - Creating alerts
+    - Updating alerts
+    - Deleting alerts
+    """
     pass
 
 
@@ -26,38 +27,33 @@ def alerts_group():
 @click.option('--status', help='Filter by status')
 @click.option('--source', help='Filter by source')
 @click.option('--columns', help='Comma-separated list of columns to display (table format only)')
+@click.option('--view', default='simple', type=click.Choice(['simple', 'full']),
+              help="View type: 'simple' removes null/empty values, 'full' shows all fields.")
 @click.pass_context
+@requires_client
 def list_alerts(ctx, limit: int, severity: Optional[str],
                 status: Optional[str], source: Optional[str],
-                columns: Optional[str]):
+                columns: Optional[str], view: str):
     """List alerts with optional filtering."""
     try:
         # Build query parameters
-        params: Dict[str, Any] = {'$limit': limit}
-
+        params = {'$limit': limit}
         if severity:
-            severity_value = get_picklist_value(ctx, severity, 'AlertSeverity')
-            if severity_value:
-                params['severity'] = severity_value
-
+            params['severity'] = severity
         if status:
-            status_value = get_picklist_value(ctx, status, 'AlertStatus')
-            if status_value:
-                params['status'] = status_value
-
+            params['status'] = status
         if source:
             params['source'] = source
 
-        # Get alerts using service
-        alerts = ctx.obj.alert_service.list_alerts(params=params)
+        alerts = ctx.obj.client.alerts.list(params=params)
 
         # Parse columns for table format
         table_columns = columns.split(',') if columns else None
 
-        # Output results
         format_output(alerts.get('hydra:member', []),
                       ctx.obj.config.output_format,
-                      table_columns)
+                      table_columns,
+                      view)
 
     except Exception as e:
         error(f"Failed to list alerts: {str(e)}")
@@ -67,10 +63,11 @@ def list_alerts(ctx, limit: int, severity: Optional[str],
 @alerts_group.command('get')
 @click.argument('alert_id')
 @click.pass_context
+@requires_client
 def get_alert(ctx, alert_id: str):
     """Get details of a specific alert."""
     try:
-        alert = ctx.obj.alert_service.get_alert(alert_id)
+        alert = ctx.obj.client.alerts.get(alert_id)
         format_output(alert, ctx.obj.config.output_format)
     except Exception as e:
         error(f"Failed to get alert: {str(e)}")
@@ -80,12 +77,12 @@ def get_alert(ctx, alert_id: str):
 @alerts_group.command('create')
 @click.option('--name', required=True, help='Alert name')
 @click.option('--description', help='Alert description')
-@click.option('--severity', type=click.Choice(['Critical', 'High', 'Medium', 'Low']),
-              help='Alert severity')
+@click.option('--severity', help='Alert severity')
 @click.option('--status', help='Alert status')
 @click.option('--source', help='Alert source')
 @click.option('--type', help='Alert type')
 @click.pass_context
+@requires_client
 def create_alert(ctx, name: str, description: Optional[str],
                  severity: Optional[str], status: Optional[str],
                  source: Optional[str], type: Optional[str]):
@@ -94,29 +91,17 @@ def create_alert(ctx, name: str, description: Optional[str],
         alert_data = {
             'name': name,
             'description': description,
+            'severity': severity,
+            'status': status,
             'source': source,
             'type': type
         }
-
-        # Handle picklist values
-        if severity:
-            severity_value = get_picklist_value(ctx, severity, 'AlertSeverity')
-            if severity_value:
-                alert_data['severity'] = severity_value
-
-        if status:
-            status_value = get_picklist_value(ctx, status, 'AlertStatus')
-            if status_value:
-                alert_data['status'] = status_value
-
         # Remove None values
         alert_data = {k: v for k, v in alert_data.items() if v is not None}
 
-        # Create alert using service
-        alert = ctx.obj.alert_service.create_alert(alert_data)
+        alert = ctx.obj.client.alerts.create(**alert_data)
         success(f"Created alert with ID: {alert.get('@id')}")
         format_output(alert, ctx.obj.config.output_format)
-
     except Exception as e:
         error(f"Failed to create alert: {str(e)}")
         ctx.exit(1)
@@ -126,12 +111,12 @@ def create_alert(ctx, name: str, description: Optional[str],
 @click.argument('alert_id')
 @click.option('--name', help='Alert name')
 @click.option('--description', help='Alert description')
-@click.option('--severity', type=click.Choice(['Critical', 'High', 'Medium', 'Low']),
-              help='Alert severity')
+@click.option('--severity', help='Alert severity')
 @click.option('--status', help='Alert status')
 @click.option('--source', help='Alert source')
 @click.option('--type', help='Alert type')
 @click.pass_context
+@requires_client
 def update_alert(ctx, alert_id: str, name: Optional[str],
                  description: Optional[str], severity: Optional[str],
                  status: Optional[str], source: Optional[str],
@@ -141,21 +126,11 @@ def update_alert(ctx, alert_id: str, name: Optional[str],
         alert_data = {
             'name': name,
             'description': description,
+            'severity': severity,
+            'status': status,
             'source': source,
             'type': type
         }
-
-        # Handle picklist values
-        if severity:
-            severity_value = get_picklist_value(ctx, severity, 'AlertSeverity')
-            if severity_value:
-                alert_data['severity'] = severity_value
-
-        if status:
-            status_value = get_picklist_value(ctx, status, 'AlertStatus')
-            if status_value:
-                alert_data['status'] = status_value
-
         # Remove None values
         alert_data = {k: v for k, v in alert_data.items() if v is not None}
 
@@ -163,11 +138,9 @@ def update_alert(ctx, alert_id: str, name: Optional[str],
             error("No update parameters provided")
             ctx.exit(1)
 
-        # Update alert using service
-        alert = ctx.obj.alert_service.update_alert(alert_id, alert_data)
+        alert = ctx.obj.client.alerts.update(alert_id, alert_data)
         success(f"Updated alert: {alert_id}")
         format_output(alert, ctx.obj.config.output_format)
-
     except Exception as e:
         error(f"Failed to update alert: {str(e)}")
         ctx.exit(1)
@@ -177,6 +150,7 @@ def update_alert(ctx, alert_id: str, name: Optional[str],
 @click.argument('alert_id')
 @click.option('--force/--no-force', default=False, help='Force deletion without confirmation')
 @click.pass_context
+@requires_client
 def delete_alert(ctx, alert_id: str, force: bool):
     """Delete an alert."""
     try:
@@ -184,9 +158,8 @@ def delete_alert(ctx, alert_id: str, force: bool):
             if not click.confirm(f"Are you sure you want to delete alert {alert_id}?"):
                 return
 
-        ctx.obj.alert_service.delete_alert(alert_id)
+        ctx.obj.client.alerts.delete(alert_id)
         success(f"Deleted alert: {alert_id}")
-
     except Exception as e:
         error(f"Failed to delete alert: {str(e)}")
         ctx.exit(1)

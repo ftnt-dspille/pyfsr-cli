@@ -8,20 +8,60 @@ from rich.table import Table
 
 console = Console()
 
+
 def custom_ssl_warning(*args: Any) -> None:
     if "Unverified HTTPS request" in str(args[0]):
         warning("Using unverified HTTPS connection - certificate validation disabled")
 
+
 warnings.showwarning = custom_ssl_warning
 
-def format_output(data: Any, format: str = 'json', table_columns: Optional[List[str]] = None) -> None:
+
+def format_output(data: Any, format: str = 'json', table_columns: Optional[List[str]] = None,
+                  view: str = 'simple') -> None:
     """Format and display output data.
 
     Args:
         data: Data to display
         format: Output format ('json', 'table', 'yaml')
         table_columns: Column names for table format
+        view: Output view ('simple' removes null/empty values, 'full' shows all fields)
     """
+
+    def process_value(value):
+        """Process individual values to handle specific transformations."""
+        if isinstance(value, dict):
+            # Handle dictionaries with @type == "Person"
+            if value.get("@type") == "Person":
+                firstname = value.get("firstname", "")
+                lastname = value.get("lastname", "")
+                return f"{firstname} {lastname}".strip()
+            # Handle dictionaries with itemValue
+            if "itemValue" in value:
+                return value["itemValue"]
+        return value
+
+    def filter_data(data):
+        """Remove null/empty values and process special cases if view is 'simple'."""
+        if view == 'simple':
+            if isinstance(data, list):
+                return [
+                    {
+                        k: process_value(v)
+                        for k, v in item.items() if v not in [None, '', []]
+                    }
+                    for item in data
+                ]
+            elif isinstance(data, dict):
+                return {
+                    k: process_value(v)
+                    for k, v in data.items() if v not in [None, '', []]
+                }
+        return data
+
+    # Apply filtering
+    data = filter_data(data)
+
     if format == 'json':
         console.print(json.dumps(data, indent=2))
     elif format == 'table' and isinstance(data, (list, dict)):
