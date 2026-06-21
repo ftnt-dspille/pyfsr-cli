@@ -28,25 +28,27 @@ def init_config(ctx, server: str, token: Optional[str],
                 verify_ssl: bool, save_password: bool, output: str):
     """Initialize PyFSR configuration."""
     try:
-        # Validate auth options
+        # First set the basic config values
+        ctx.obj.load_config()
+        ctx.obj.config.server = server
+        ctx.obj.config.verify_ssl = verify_ssl
+        ctx.obj.config.output_format = output
+
         if token and (username or password):
             raise click.BadParameter(
                 "Cannot use both token and username/password authentication"
             )
 
-        if username and not password:
-            password = click.prompt('Password', hide_input=True)
-            auth_method = 'userpass'
-
-        if password and not username:
-            raise click.BadParameter("Username must be provided with password")
-
-        # If verify_ssl not specified, prompt for it
-        if verify_ssl is None:
-            verify_ssl = not click.confirm('Skip SSL certificate verification?', default=True)
-
-        # If no auth provided, prompt for method
-        if not token and not username:
+        # Set appropriate auth method
+        if token:
+            ctx.obj.config.set_auth_method('token', token=token)
+        elif username or password:
+            if not password:
+                password = click.prompt('Password', hide_input=True)
+            ctx.obj.config.set_auth_method('userpass', username=username, password=password,
+                                           save_password=save_password)
+        else:
+            # Prompt for auth method if none provided
             auth_method = click.prompt(
                 'Authentication method',
                 type=click.Choice(['token', 'userpass']),
@@ -55,9 +57,12 @@ def init_config(ctx, server: str, token: Optional[str],
 
             if auth_method == 'token':
                 token = click.prompt('Authentication token', hide_input=True)
+                ctx.obj.config.set_auth_method('token', token=token)
             else:
                 username = click.prompt('Username')
                 password = click.prompt('Password', hide_input=True)
+                ctx.obj.config.set_auth_method('userpass', username=username, password=password,
+                                               save_password=save_password)
 
             # Warn about SSL verification if disabled
             if not verify_ssl:
@@ -68,17 +73,6 @@ def init_config(ctx, server: str, token: Optional[str],
             warning("Saving password in config file is not recommended")
             if not click.confirm('Are you sure?'):
                 save_password = False
-
-        # Update config
-        ctx.obj.load_config({
-            'server': server,
-            'token': token,
-            'username': username,
-            'password': password,
-            'verify_ssl': verify_ssl,
-            'output_format': output,
-            'save_password': save_password
-        })
 
         # Test configuration by initializing client
         ctx.obj.init_client()
@@ -101,13 +95,23 @@ def show_config(ctx):
         if not ctx.obj or not ctx.obj.config:
             raise click.UsageError("Configuration is not loaded. Please initialize it using 'config init'.")
 
+        # Debug information
+        click.echo("\nDebug Information:")
+        click.echo(f"Config file path: {ctx.obj.config_path}")
+        click.echo(f"Config file exists: {ctx.obj.config_path.exists()}")
+        if ctx.obj.config_path.exists():
+            with open(ctx.obj.config_path) as f:
+                click.echo(f"Raw config file contents: {f.read()}")
+        click.echo(f"Current CLIConfig object: {ctx.obj.config}")
+        click.echo("")
+
         config_data = {
             'server': ctx.obj.config.server,
             'verify_ssl': ctx.obj.config.verify_ssl,
             'output_format': ctx.obj.config.output_format,
             'auth_method': (
                 'token' if ctx.obj.config.token else
-                'userpass' if ctx.obj.config.username else
+                'userpass' if (ctx.obj.config.username and ctx.obj.config.password) else
                 'None'
             )
         }

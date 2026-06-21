@@ -22,6 +22,21 @@ class CLIConfig:
     output_format: str = 'json'
     save_password: bool = False
 
+    def set_auth_method(self, auth_type: str, **credentials):
+        """Switch auth method and clear old credentials"""
+        # First clear all auth
+        self.token = None
+        self.username = None
+        self.password = None
+
+        # Then set new auth
+        if auth_type == 'token':
+            self.token = credentials['token']  # Make required
+        elif auth_type == 'userpass':
+            self.username = credentials['username']  # Make required
+            self.password = credentials['password']  # Make required
+            self.save_password = credentials.get('save_password', False)
+
     @property
     def auth(self) -> Optional[tuple[str, str] | str]:
         """Get authentication credentials in the format FortiSOAR client expects."""
@@ -35,13 +50,18 @@ class CLIConfig:
         """Convert config to dictionary for saving."""
         config = {
             'server': self.server,
-            'token': self.token,
-            'username': self.username,
             'verify_ssl': self.verify_ssl,
-            'output_format': self.output_format,
+            'output_format': self.output_format
         }
-        if self.save_password and self.password:
-            config['password'] = self.password
+
+        # Add auth details based on method
+        if self.token:
+            config['token'] = self.token
+        elif self.username:
+            config['username'] = self.username
+            if self.save_password and self.password:
+                config['password'] = self.password
+
         return config
 
 
@@ -75,18 +95,22 @@ class CLIState:
 
     def _load_from_file(self) -> None:
         """Load configuration from file."""
+        click.echo(f"Loading config from {self.config_path}")
         if self.config_path.exists():
             with open(self.config_path) as f:
                 file_config = yaml.safe_load(f) or {}
+            click.echo(f"Loaded config: {file_config}")
 
-            if self.config:
-                self.config.server = file_config.get('server', self.config.server)
-                self.config.token = file_config.get('token', self.config.token)
-                self.config.username = file_config.get('username', self.config.username)
-                self.config.password = file_config.get('password', self.config.password)
-                self.config.verify_ssl = file_config.get('verify_ssl', self.config.verify_ssl)
-                self.config.output_format = file_config.get('output_format', self.config.output_format)
-                self.config.save_password = file_config.get('save_password', self.config.save_password)
+            # Create new CLIConfig instance with file values
+            self.config = CLIConfig(
+                server=file_config.get('server'),
+                token=file_config.get('token'),
+                username=file_config.get('username'),
+                password=file_config.get('password'),
+                verify_ssl=file_config.get('verify_ssl', True),
+                output_format=file_config.get('output_format', 'json'),
+                save_password=file_config.get('save_password', False)
+            )
 
     def _load_from_env(self) -> None:
         """Load configuration from environment variables."""
@@ -113,6 +137,7 @@ class CLIState:
         if not self.config:
             return
 
+        # Only override if param value is not None
         if server := params.get('server'):
             self.config.server = server
         if token := params.get('token'):
@@ -121,12 +146,16 @@ class CLIState:
             self.config.username = username
         if password := params.get('password'):
             self.config.password = password
+
+        # Handle boolean flags - these can be False
         if 'verify_ssl' in params:
             self.config.verify_ssl = params['verify_ssl']
         if output_format := params.get('output_format'):
             self.config.output_format = output_format
         if 'save_password' in params:
             self.config.save_password = params['save_password']
+
+        click.echo(f"Config after CLI params: {self.config}")
 
     def init_client(self) -> None:
         """Initialize the FortiSOAR client and services."""
